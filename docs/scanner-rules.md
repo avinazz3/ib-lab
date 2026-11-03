@@ -1,4 +1,4 @@
-# Breakout screen v0.1
+# Breakout screen v0.2
 
 These are explicit engineering proxies, not an exact replication of a discretionary
 trader. All fractions are decimal (0.30 means 30%); ATR and moving averages are in
@@ -33,17 +33,77 @@ this list and data coverage; exclusions are reported rather than hidden.
 - Contraction = mean TR over final five base sessions divided by mean TR over the
   preceding ten base sessions, at most `max_contraction`.
 - Support proxy = minimum low of final five base sessions minus minimum low of
-  first five base sessions, strictly positive.
+  first five base sessions. Require it to be strictly positive only when
+  `require_rising_support` is true (the default).
 - ATR14: initialize with mean of the first 14 true ranges in the 127-session
   warm-up, then apply `(13*ATR + TR)/14` for each subsequent session.
 - Proximity = `abs(C[d] - SMA20[d]) / ATR14[d]`, at most `max_sma_distance_atr`.
 - Trend = `SMA20[d] > SMA20[d-5]`.
 
-Pass all checks to become a candidate. The scanner deliberately does not optimize
+Pass all mandatory checks to become a candidate. `checks` always records the actual
+result, including a false informational support check. `informational_checks`
+identifies checks excluded from rejection reasons and acceptance. The scanner does not optimize
 the base length per stock. Zero denominators are data/feature failures.
 
 The report stores the base ceiling and ATR for subsequent intraday research. It
 does not calculate an entry, a day-low stop, or a position quantity from daily bars.
+
+## Strict and review configurations
+
+The default and `configs/breakout.json` retain the strict numerical rules.
+`configs/breakout-review.json` applies the approved relaxation for human review:
+
+| Criterion | Strict | Review |
+| --- | --- | --- |
+| Price | >= $5 | Same |
+| Mean 20-session dollar volume | >= $10 million | Same |
+| Leadership on any 21/63/126-session horizon | >= 98th percentile | Same |
+| Prior impulse | >= 30% | Same |
+| Base depth | <= 20% | <= 25% |
+| Contraction ratio | <= 0.70 | <= 1.00 |
+| Absolute distance from SMA20 | <= 1 ATR | <= 2 ATR |
+| Support proxy | > 0 required | Informational |
+| SMA20 change over five sessions | > 0 | Same |
+| Valid, complete latest 127 sessions | Required | Same |
+
+Both modes use identical feature windows, ranking populations and formulas.
+Relaxed thresholds are research hypotheses, not evidence of improved returns.
+`accepted` means the stock passed the selected screen; it does not mean a human
+approved it or that the system can place a trade. Human approval and execution
+are not implemented by this change.
+
+## Candidate research numbers
+
+`candidates.csv` has one row per candidate: symbol/exchange/currency, last completed
+session and close, 21/63/126-session returns and their start dates, leadership
+percentiles, mean 20-session volume and dollar volume, the existing setup features,
+all check results and whether rising support is required. Returns end on the last
+completed session. `report.json` retains every instrument and its rejection reasons.
+
+Each candidate also has a `research` object in the report. `candidate-events.csv`
+flattens its event rows. Within the latest 126 completed sessions, select the three
+largest absolute close-to-close returns and the three highest relative-volume
+observations. Combine dates selected by both and sort chronologically, giving at
+most six rows per candidate. Ties favor the earlier date. Each row contains:
+
+- Date and `selected_for` (price change, relative volume, or both).
+- `price_change = close / previous_session_close - 1`.
+- `opening_gap = open / previous_session_close - 1`.
+- Actual daily volume and `relative_volume = volume / mean(previous 20 session volumes)`.
+
+Returns, price changes and gaps are decimal fractions: 0.05 means 5%. Relative volume
+is a multiple: 2 means twice the preceding average. The current session is excluded
+from its volume baseline. A zero or incomplete baseline yields null (blank in CSV),
+never infinity or a shorter mean. Such a date can still appear as a price event.
+
+Research uses up to 146 completed sessions for the volume context. Old snapshots
+may contain only 127 bars; all 126 price changes remain available, but only the last
+107 sessions can then have a full volume baseline. The event window and
+`relative_volume_session_count` disclose actual coverage. Missing older context
+does not alter the 127-session eligibility requirement. Event selection considers
+only available complete baselines. These are largest observed moves, not verified
+anomalies or explanations of their causes. News collection and generated research
+questions are outside the application.
 
 ## Limitations
 

@@ -15,8 +15,9 @@ import talib
 from ib_lab.calendar import Sessions
 from ib_lab.models import DailyBar, Instrument
 
-STRATEGY_VERSION = "breakout-v0.1"
+STRATEGY_VERSION = "breakout-v0.2"
 LOOKBACKS = (21, 63, 126)
+RESEARCH_SESSIONS = 146  # 126 event sessions plus 20 preceding volume observations.
 
 
 @dataclass(frozen=True)
@@ -28,9 +29,13 @@ class BreakoutConfig:
     max_base_depth: float = 0.20
     max_contraction: float = 0.70
     max_sma_distance_atr: float = 1.0
+    require_rising_support: bool = True
 
     def __post_init__(self) -> None:
-        if not all(math.isfinite(v) and v >= 0 for v in asdict(self).values()):
+        if type(self.require_rising_support) is not bool:
+            raise ValueError("require_rising_support must be a boolean")
+        numeric = {k: v for k, v in asdict(self).items() if k != "require_rising_support"}
+        if not all(math.isfinite(v) and v >= 0 for v in numeric.values()):
             raise ValueError("Screen parameters must be finite, nonnegative numbers")
         if not 0 <= self.leadership_percentile <= 100:
             raise ValueError("leadership_percentile must be between 0 and 100")
@@ -58,6 +63,7 @@ def features(bars: list[DailyBar]) -> dict[str, float]:
     sma20 = fmean(b.close for b in bars[-20:])
     return {
         "close": close,
+        "volume20": fmean(b.volume for b in bars[-20:]),
         "dollar_volume20": fmean(b.close * b.volume for b in bars[-20:]),
         **{f"return_{n}": close / bars[-n - 1].close - 1 for n in LOOKBACKS},
         "prior_impulse": prior[-1].close / min(b.close for b in prior) - 1,
@@ -69,6 +75,48 @@ def features(bars: list[DailyBar]) -> dict[str, float]:
         "sma20": sma20,
         "sma20_change5": sma20 - fmean(b.close for b in bars[-25:-5]),
         "sma_distance_atr": abs(close - sma20) / atr,
+    }
+
+
+def research_summary(bars: list[DailyBar], sessions: list) -> dict:
+    """Dated observations only; missing volume context never becomes a partial mean."""
+    frame = pd.DataFrame([asdict(b) for b in bars]).set_index("session").reindex(sessions)
+    previous_close = frame["close"].shift(1)
+    frame["price_change"] = frame["close"] / previous_close - 1
+    frame["opening_gap"] = frame["open"] / previous_close - 1
+    volume_mean = frame["volume"].shift(1).rolling(20, min_periods=20).mean()
+    frame["relative_volume"] = frame["volume"] / volume_mean.replace(0, np.nan)
+    window = frame.iloc[-126:]
+    price_dates = window["price_change"].abs().dropna().nlargest(3).index
+    volume_dates = window["relative_volume"].dropna().nlargest(3).index
+    events = []
+    for day in sorted(set(price_dates) | set(volume_dates)):
+        row = window.loc[day]
+        events.append(
+            {
+                "date": day.isoformat(),
+                "price_change": float(row["price_change"]),
+                "opening_gap": float(row["opening_gap"]),
+                "volume": float(row["volume"]),
+                "relative_volume": (
+                    float(row["relative_volume"]) if pd.notna(row["relative_volume"]) else None
+                ),
+                "selected_for": [
+                    name
+                    for name, dates in (
+                        ("price_change", price_dates),
+                        ("relative_volume", volume_dates),
+                    )
+                    if day in dates
+                ],
+            }
+        )
+    return {
+        "return_start_dates": {str(n): sessions[-n - 1].isoformat() for n in LOOKBACKS},
+        "event_window_start": window.index[0].isoformat(),
+        "event_window_end": window.index[-1].isoformat(),
+        "relative_volume_session_count": int(window["relative_volume"].notna().sum()),
+        "events": events,
     }
 
 
@@ -94,6 +142,8 @@ def screen(
             grouped[bar.instrument_key].append(bar)
     results = []
     eligible = []
+    histories = {}
+    informational = [] if config.require_rising_support else ["rising_support"]
     for instrument in instruments:
         row = {
             "instrument": asdict(instrument),
@@ -123,6 +173,7 @@ def screen(
             row["checks"] = checks
             if all(checks.values()):
                 eligible.append(row)
+                histories[instrument.key] = rows[-RESEARCH_SESSIONS:]
             else:
                 row["reasons"] = [key for key, passed in checks.items() if not passed]
         except ValueError as error:
@@ -160,8 +211,14 @@ def screen(
             "rising_sma": f["sma20_change5"] > 0,
         }
         row["checks"] = checks
-        row["reasons"] = [key for key, passed in checks.items() if not passed]
-        row["accepted"] = all(checks.values())
+        row["reasons"] = [
+            key for key, passed in checks.items() if not passed and key not in informational
+        ]
+        row["accepted"] = not row["reasons"]
+        if row["accepted"]:
+            row["research"] = research_summary(
+                histories[row["instrument_key"]], completed[-RESEARCH_SESSIONS:]
+            )
     payload = json.dumps(asdict(config), sort_keys=True, allow_nan=False).encode()
     warnings = ["Rankings are relative to the supplied, data-complete, liquid universe."]
     if len(eligible) < 50:
@@ -172,6 +229,7 @@ def screen(
         "last_completed_session": str(expected[-1]),
         "config": asdict(config),
         "config_sha256": hashlib.sha256(payload).hexdigest(),
+        "informational_checks": informational,
         "universe_count": len(instruments),
         "rank_eligible_count": len(eligible),
         "candidate_count": sum(row["accepted"] for row in results),

@@ -1,4 +1,6 @@
+import csv
 import json
+from pathlib import Path
 
 import pytest
 
@@ -29,12 +31,59 @@ def test_cli_offline_workflow_and_snapshot_integrity(tmp_path):
     assert report["candidate_count"] == 1
     assert report["historical_availability_verified"] is False
     assert "DEMO099" in (output / "candidates.csv").read_text()
+    with (output / "candidates.csv").open() as handle:
+        candidate = next(csv.DictReader(handle))
+    assert candidate["symbol"] == "DEMO099"
+    assert candidate["last_completed_session"] == "2026-10-30"
+    assert candidate["check_rising_support"] == "True"
+    assert candidate["relative_volume_session_count"] == "126"
+    with (output / "candidate-events.csv").open() as handle:
+        events = list(csv.DictReader(handle))
+    assert 1 <= len(events) <= 6
+    assert all(e["instrument_key"] == candidate["instrument_key"] for e in events)
+    assert {e["date"] for e in events} == {
+        e["date"] for e in report["results"][0]["research"]["events"]
+    }
     # Existing snapshots cannot be overwritten even by a second demo command.
     assert main(["demo", "--out", str(snapshot)]) == 2
     with (snapshot / "bars.parquet").open("ab") as handle:
         handle.write(b"tampered")
     with pytest.raises(ValueError, match="checksum"):
         read_snapshot(snapshot)
+
+
+def test_review_config_and_empty_shortlist_have_valid_csv_headers(tmp_path):
+    snapshot = tmp_path / "snapshot"
+    assert main(["demo", "--out", str(snapshot)]) == 0
+    config = json.loads((Path(__file__).parents[1] / "configs/breakout-review.json").read_text())
+    config["min_price"] = 1_000_000
+    path = tmp_path / "review.json"
+    path.write_text(json.dumps(config))
+    out = tmp_path / "empty"
+    assert (
+        main(
+            [
+                "scan",
+                "--snapshot",
+                str(snapshot),
+                "--as-of",
+                "2026-10-30T22:00:00Z",
+                "--config",
+                str(path),
+                "--out",
+                str(out),
+            ]
+        )
+        == 0
+    )
+    report = json.loads((out / "report.json").read_text())
+    assert report["candidate_count"] == 0
+    assert report["informational_checks"] == ["rising_support"]
+    for name in ("candidates.csv", "candidate-events.csv"):
+        with (out / name).open() as handle:
+            reader = csv.DictReader(handle)
+            assert "instrument_key" in reader.fieldnames
+            assert list(reader) == []
 
 
 def test_universe_requires_identity_and_unique_listings(tmp_path):

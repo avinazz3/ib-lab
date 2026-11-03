@@ -14,7 +14,7 @@ from ib_lab import __version__
 from ib_lab.broker import ConnectionSettings, ReadOnlyBroker
 from ib_lab.demo import DEMO_DECISION, write_demo
 from ib_lab.models import Instrument, aware_timestamp, read_universe
-from ib_lab.screen import BreakoutConfig, screen
+from ib_lab.screen import LOOKBACKS, BreakoutConfig, screen
 from ib_lab.store import new_directory, read_snapshot, sha256, write_json, write_snapshot
 
 
@@ -79,15 +79,49 @@ def run_scan(args) -> int:
     new_directory(args.out)
     write_json(args.out / "report.json", report)
     accepted = [row for row in report["results"] if row["accepted"]]
+    feature_columns = [
+        "close",
+        "base_ceiling",
+        "atr14",
+        "contraction",
+        "volume20",
+        "dollar_volume20",
+        *[f"return_{n}" for n in LOOKBACKS],
+        *[f"percentile_{n}" for n in LOOKBACKS],
+        "prior_impulse",
+        "base_depth",
+        "support_change",
+        "sma20",
+        "sma20_change5",
+        "sma_distance_atr",
+    ]
+    check_columns = [
+        "price",
+        "liquidity",
+        "leadership",
+        "impulse",
+        "base_depth",
+        "contraction",
+        "rising_support",
+        "sma_proximity",
+        "rising_sma",
+    ]
     with (args.out / "candidates.csv").open("w", newline="") as handle:
         writer = csv.DictWriter(
             handle,
             fieldnames=[
                 "instrument_key",
-                "close",
-                "base_ceiling",
-                "atr14",
-                "contraction",
+                "symbol",
+                "primary_exchange",
+                "currency",
+                "last_completed_session",
+                *feature_columns,
+                *[f"return_{n}_start" for n in LOOKBACKS],
+                *[f"check_{key}" for key in check_columns],
+                "rising_support_required",
+                "event_window_start",
+                "event_window_end",
+                "relative_volume_session_count",
             ],
         )
         writer.writeheader()
@@ -95,9 +129,48 @@ def run_scan(args) -> int:
             writer.writerow(
                 {
                     "instrument_key": row["instrument_key"],
-                    **{key: row["features"][key] for key in writer.fieldnames[1:]},
+                    **row["instrument"],
+                    "last_completed_session": report["last_completed_session"],
+                    **{key: row["features"][key] for key in feature_columns},
+                    **{
+                        f"return_{n}_start": row["research"]["return_start_dates"][str(n)]
+                        for n in LOOKBACKS
+                    },
+                    **{f"check_{key}": row["checks"][key] for key in check_columns},
+                    "rising_support_required": config.require_rising_support,
+                    **{
+                        key: row["research"][key]
+                        for key in (
+                            "event_window_start",
+                            "event_window_end",
+                            "relative_volume_session_count",
+                        )
+                    },
                 }
             )
+    with (args.out / "candidate-events.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "instrument_key",
+                "date",
+                "price_change",
+                "opening_gap",
+                "volume",
+                "relative_volume",
+                "selected_for",
+            ],
+        )
+        writer.writeheader()
+        for row in accepted:
+            for event in row["research"]["events"]:
+                writer.writerow(
+                    {
+                        "instrument_key": row["instrument_key"],
+                        **event,
+                        "selected_for": ";".join(event["selected_for"]),
+                    }
+                )
     print(
         json.dumps(
             {
@@ -108,6 +181,8 @@ def run_scan(args) -> int:
                 "last_completed_session": report["last_completed_session"],
                 "synthetic": report["synthetic"],
                 "report": str(args.out / "report.json"),
+                "candidates_csv": str(args.out / "candidates.csv"),
+                "events_csv": str(args.out / "candidate-events.csv"),
                 "warnings": report["warnings"],
             },
             indent=2,
