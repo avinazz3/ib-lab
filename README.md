@@ -14,6 +14,8 @@ project functions connect these libraries and express the strategy-specific rule
 
 ## What works now
 
+- `daily`: automatic listing discovery, transactional incremental history cache,
+  and the existing scanner in one command. See [daily workflow](docs/daily-workflow.md).
 - `probe`: read-only connection, contract qualification, daily/minute history, and a
   quote diagnostic that distinguishes requested and observed market-data types.
 - `download`: serial, paced daily history collection for a supplied universe;
@@ -69,6 +71,30 @@ data; it is not a historical strategy result.
 
 Inspect `runs/demo-001/report.json` for all feature values, checks, reasons,
 configuration hash, and input hashes. `candidates.csv` contains only passing rows.
+
+## Run the automatic daily workflow
+
+With your current live TWS connection in Read-Only API mode:
+
+```bash
+python -m ib_lab daily --port 7496 --seed-snapshot data/real-001
+```
+
+This discovers a broad current universe, imports compatible history from your
+existing snapshot, updates the cache, and writes one consolidated scan report.
+Run the same command subsequently; existing cache entries are preserved. Output
+directories are timestamped automatically. Default cache: `data/history-cache.sqlite`.
+
+Initial collection for several thousand stocks can take hours. Each completed
+stock is checkpointed; interruption does not discard that work. An optional
+`--max-downloads 250` bounds the number of stocks needing requests in one invocation;
+unprocessed listings remain visible as failures and the report is partial. A rerun
+continues from checkpoints. `--max-symbols 100` is an explicitly labelled alphabetical
+subset for testing; its rankings do not represent the broad universe.
+
+The 20-minute completion lag defaults to excluding a just-closed session while
+your data is delayed. This is a timing buffer, not proof of data freshness. The
+workflow is read-only and does not monitor intraday entries or place orders.
 
 ## Connect on your own machine
 
@@ -137,14 +163,14 @@ membership was available on a past date. There is no delisting dataset here.
 
 Each snapshot/run path must be new. A failed symbol makes the snapshot `partial`
 and the command exit nonzero. Complete symbols remain inspectable. Re-run into a
-new directory after addressing failures; this release does not retry or resume
-requests automatically. `--request-spacing` provides local pacing, and the SDK
+new directory after addressing failures; the `download` command does not resume.
+Use `daily` for checkpointed incremental updates. `--request-spacing` provides local pacing, and the SDK
 also throttles messages. A larger production universe will require further
 request budgeting and incremental caching.
 
-IBKR's native scanner can be a future candidate source. This screen currently
-operates over your supplied universe, avoiding any claim that a limited broker
-scanner result covers the whole market.
+The `scan` command operates over a supplied snapshot. `daily` can discover current
+listings automatically from Nasdaq Trader, or accept an explicit universe CSV.
+Neither relies on a limited broker-scanner result as if it covered the whole market.
 
 ## Rules and interpretation
 
@@ -171,7 +197,8 @@ uv run pytest
 Tests cover a constructed accepted setup, missing/invalid data, duplicate sessions,
 future-data isolation, incomplete sessions, early closes, DST, ranking ties,
 checksums, read-only connections, request failures, and quote-subscription cleanup.
-All 25 tests pass on Python 3.12 and 3.14. Calendar dependencies currently emit
+The original 25 tests passed on Python 3.12 and 3.14; additional tests cover
+discovery, incremental caching, seeding, interruption and locking. Calendar dependencies emit
 pandas deprecation warnings. Broker tests use fakes; an actual TWS/Gateway smoke
 test still needs to be run by
 the account holder. No real IBKR market data is included in the repository.
