@@ -17,6 +17,7 @@ from ib_lab.broker import ConnectionSettings, ReadOnlyBroker
 from ib_lab.cache import HistoryCache
 from ib_lab.calendar import Sessions
 from ib_lab.models import Instrument, read_universe
+from ib_lab.screen import RESEARCH_SESSIONS
 from ib_lab.store import new_directory, read_snapshot, sha256, write_json, write_snapshot
 from ib_lab.universe import discover
 
@@ -160,7 +161,7 @@ async def collect(
                         raise ValueError("Invalid refreshed session")
                     cache.put(instrument, con_id, target if full else cached[1], selected)
                     action = "full_refresh" if full else "incremental"
-                collected.extend(selected[-127:])
+                collected.extend(selected[-RESEARCH_SESSIONS:])
             except Exception as error:
                 if connecting:
                     raise ConnectionError(

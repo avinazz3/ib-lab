@@ -90,7 +90,7 @@ def test_bootstrap_checkpoint_then_reuse_without_any_connection(tmp_path, histor
             collect([instrument], cache, ConnectionSettings(), DEMO_DECISION, broker_factory=broker)
         )
         assert first[3][0]["action"] == "full_refresh"
-        assert len(first[0]) == 127
+        assert len(first[0]) == 146
         again = asyncio.run(
             collect([instrument], cache, ConnectionSettings(), DEMO_DECISION, broker_factory=broker)
         )

@@ -61,7 +61,8 @@ by seeding. Short IPO histories are retained but remain ineligible for the scree
 Successful stocks are committed immediately, so Ctrl-C leaves checkpoints for a
 rerun. Failed updates preserve the prior cache entry but exclude that stock's bars
 from the run snapshot. Errors and explicit budgets do not shrink the declared
-universe silently. The snapshot keeps only the latest 127 completed bars per stock;
+universe silently. The snapshot keeps up to the latest 146 completed bars per stock
+(127 for screening and extra volume-baseline context for research events);
 the cache retains the broader history. It is intended for the frozen daily scan,
 not arbitrary historical replay.
 
@@ -73,7 +74,8 @@ Each automatically timestamped run directory contains:
 - `universe/`: source directories and discovery evidence (automatic mode).
 - `universe.json`: source scope and any explicit subset limit.
 - `snapshot/`: Parquet bars, manifest, cache action per stock, and failures.
-- `scan/report.json` and `scan/candidates.csv`: the existing screening outputs.
+- `scan/report.json` and `scan/candidates.csv`: screening results and candidate numbers.
+- `scan/candidate-events.csv`: up to six dated price/volume observations per candidate.
 
 `--universe PATH` overrides automatic discovery. `--max-symbols N` selects the
 first N sorted listings and labels the result as a subset. `--max-downloads N`
@@ -85,8 +87,9 @@ Rank only price/liquidity-eligible stocks with valid, complete recent history.
 Always inspect the eligible denominator and failures: a partial collection yields
 conditional rankings, not certified market-wide ranks. Zero candidates alone is
 not an error. Failed downloads or scan data errors return exit 1; initialization
-errors return 2; interruption returns 130. No strategy thresholds are weakened to
-produce candidates.
+errors return 2; interruption returns 130. The default thresholds remain strict.
+Pass `--config configs/breakout-review.json` to select the approved broader human
+review rules. The scanner never adjusts thresholds automatically to produce candidates.
 
 The exact setup rules remain in [scanner-rules.md](scanner-rules.md). Automated
 universe/data orchestration does not implement entries, stops, sizing or exits.

@@ -71,6 +71,43 @@ data; it is not a historical strategy result.
 
 Inspect `runs/demo-001/report.json` for all feature values, checks, reasons,
 configuration hash, and input hashes. `candidates.csv` contains only passing rows.
+`candidate-events.csv` contains up to six dated price/volume observations per candidate.
+
+## Review a broader shortlist
+
+Use the approved review configuration with either `scan` or `daily`. It allows
+base depth up to 25%, a contraction ratio up to 1.0 and distance from SMA20 up to
+2 ATR; rising support is informational. Price, liquidity, leadership, impulse,
+rising SMA20 and data-quality requirements remain mandatory. The default and
+`configs/breakout.json` preserve the strict rules.
+
+To compare rules, rescan the same snapshot with the same original decision time.
+For example, for the saved daily run ending on 2 November 2026:
+
+```bash
+python -m ib_lab scan \
+  --snapshot runs/daily-20261103T042251-132922Z/snapshot \
+  --as-of 2026-11-03T04:02:51.132922+00:00 \
+  --config configs/breakout-review.json \
+  --out runs/review-001
+```
+
+This is offline and makes no IBKR requests. Replace the paths and timestamp for
+other snapshots; each output directory must be new. Existing partial-data status
+and exclusions still apply, so this run may return exit 1 while producing reports.
+
+Review `candidates.csv` for the summary, return start dates and check results;
+`candidate-events.csv` for dated price changes, opening gaps, volume and relative
+volume; and `report.json` for all instruments, provenance and research coverage.
+Return/change values are fractions (0.05 = 5%); relative volume is a multiple.
+Use the dates for external news research, then make your own review decision.
+This change does not implement approval storage, sizing or order execution.
+
+For subsequent daily collection with the review rules:
+
+```bash
+python -m ib_lab daily --port 7496 --config configs/breakout-review.json
+```
 
 ## Run the automatic daily workflow
 
