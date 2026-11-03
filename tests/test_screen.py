@@ -49,9 +49,24 @@ def test_missing_session_is_reported_and_excluded_from_ranking(data):
     report = screen(damaged, instruments, DEMO_DECISION, BreakoutConfig())
     row = next(r for r in report["results"] if r["instrument_key"] == key)
     assert row["reasons"] == ["data_quality"]
+    assert row["data_error_kind"] == "missing_sessions"
+    assert row["history"]["missing_session_count"] == 1
     assert not row["accepted"]
     assert report["rank_eligible_count"] == 99
     assert report["data_error_count"] == 1
+
+
+def test_short_contiguous_history_is_distinguished_from_missing_bars(data):
+    bars, instruments = data
+    key = instruments[-1].key
+    available = [b for b in bars if b.instrument_key == key][-50:]
+    shortened = [b for b in bars if b.instrument_key != key] + available
+    report = screen(shortened, instruments, DEMO_DECISION, BreakoutConfig())
+    row = next(r for r in report["results"] if r["instrument_key"] == key)
+    assert row["data_error_kind"] == "insufficient_history"
+    assert row["history"]["available_required_sessions"] == 50
+    assert row["history"]["missing_session_count"] == 77
+    assert row["accepted"] is False
 
 
 @pytest.mark.parametrize(

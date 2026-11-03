@@ -103,6 +103,7 @@ dependencies = [
     { name = "pandas" },
     { name = "pyarrow" },
     { name = "ta-lib" },
+    { name = "tenacity" },
 ]
 
 [package.optional-dependencies]
@@ -122,6 +123,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8,<10" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.11,<1" },
     { name = "ta-lib", specifier = ">=0.6.5,<0.7" },
+    { name = "tenacity", specifier = ">=9.1,<10" },
 ]
 provides-extras = ["dev"]
 
@@ -583,6 +585,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/82/bc/d2e4c2b752baaee592095feb69514764b004fe53af7cc893ba9c3854cc30/ta_lib-0.6.8-cp314-cp314-win32.whl", hash = "sha256:f5b6174bf4bf9152e368561dff410203c6921e4dd2afbcda3283a95957158112", size = 766352, upload-time = "2025-10-20T20:49:41.088Z" },
     { url = "https://files.pythonhosted.org/packages/40/98/0f2755b5bde81d7b1eaf96b4204f18fabea38b0efc869cb0ea05d57e0afc/ta_lib-0.6.8-cp314-cp314-win_amd64.whl", hash = "sha256:1fb4028437201e19014e4e374272b739867c8a3eb655da46675ef4c2ff14b616", size = 886955, upload-time = "2025-10-20T20:49:38.513Z" },
     { url = "https://files.pythonhosted.org/packages/0b/4c/d341020377f8b183405bdf3c5717fc2ca04a8d33b5c59b2348377ee459d9/ta_lib-0.6.8-cp314-cp314-win_arm64.whl", hash = "sha256:bfad1202fb1f9140e3810cc607058395f59032d9128cc0d716900c78bea5f337", size = 755896, upload-time = "2025-10-20T20:49:39.9Z" },
+]
+
+[[package]]
+name = "tenacity"
+version = "9.2.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/9e/497c1c8ebe5a5b5d1d4a7511aea22c0bb1a97e3170d98abdef0e1b34265a/tenacity-9.2.1.tar.gz", hash = "sha256:a606b5c808d0cded4a359d5b9932d867ff2a6a6b64d37350260fd01bbdf83839", size = 58261, upload-time = "2026-10-07T12:13:01.633Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d6/26/1ff2b0721ac66a3ec5b1402b333110b352ab0a8724052ac279a7b82d40c4/tenacity-9.2.1-py3-none-any.whl", hash = "sha256:9e56f17539296baab7beabb08b92f6ee3d7be92d8be72d763360677c2ad6580e", size = 32310, upload-time = "2026-10-07T12:13:00.102Z" },
 ]
 
 [[package]]

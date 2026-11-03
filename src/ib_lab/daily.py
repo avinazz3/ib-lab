@@ -13,7 +13,12 @@ from pathlib import Path
 
 from filelock import FileLock
 
-from ib_lab.broker import ConnectionSettings, ReadOnlyBroker
+from ib_lab.broker import (
+    BrokerUnavailableError,
+    ConnectionSettings,
+    ReadOnlyBroker,
+    failure_details,
+)
 from ib_lab.cache import HistoryCache
 from ib_lab.calendar import Sessions
 from ib_lab.models import Instrument, read_universe
@@ -83,11 +88,16 @@ async def collect(
     broker_factory=ReadOnlyBroker,
     progress=None,
     max_downloads=None,
+    failures=None,
+    diagnostics=None,
+    force_refresh=None,
 ):
     calendar = Sessions(decision.date() - timedelta(days=800), decision.date())
     completed = calendar.completed(decision.date() - timedelta(days=550), decision)
     target, required = completed[-1], set(completed[-127:])
-    collected, identities, failures, actions = [], [], [], []
+    collected, identities, actions = [], [], []
+    failures = [] if failures is None else failures
+    force_refresh = set() if force_refresh is None else force_refresh
     downloads = 0
     async with AsyncExitStack() as stack:
         broker = None
@@ -102,6 +112,7 @@ async def collect(
                     old = [b for b in old if b.session <= target]
                     fresh = (
                         bool(old)
+                        and instrument.key not in force_refresh
                         and old[-1].session == target
                         and {day for day in required if day >= old[0].session}.issubset(
                             {b.session for b in old}
@@ -118,12 +129,19 @@ async def collect(
                     downloads += 1
                     if broker is None:
                         connecting = True
-                        broker = await stack.enter_async_context(broker_factory(settings))
+                        broker = broker_factory(settings)
+                        if diagnostics is not None:
+                            diagnostics.update(
+                                messages=getattr(broker, "errors", []),
+                                retries=getattr(broker, "retries", []),
+                            )
+                        broker = await stack.enter_async_context(broker)
                         connecting = False
                     contract = await broker.resolve(instrument)
                     con_id = contract.conId
                     full = (
-                        not cached
+                        instrument.key in force_refresh
+                        or not cached
                         or cached[0] != con_id
                         or not old
                         or not 0 <= (target - cached[1]).days < 30
@@ -163,11 +181,13 @@ async def collect(
                     action = "full_refresh" if full else "incremental"
                 collected.extend(selected[-RESEARCH_SESSIONS:])
             except Exception as error:
+                failures.append({"instrument_key": instrument.key, **failure_details(error)})
                 if connecting:
-                    raise ConnectionError(
+                    raise BrokerUnavailableError(
                         "Could not connect to IBKR; cache checkpoints retained"
                     ) from error
-                failures.append({"instrument_key": instrument.key, "error": str(error)})
+                if isinstance(error, BrokerUnavailableError):
+                    raise
             identities.append({"instrument": asdict(instrument), "con_id": con_id})
             actions.append({"instrument_key": instrument.key, "action": action})
             if progress:
@@ -183,7 +203,13 @@ async def run_daily(args):
     decision = now - timedelta(minutes=args.completion_lag_minutes)
     out = args.out or Path("runs") / now.strftime("daily-%Y%m%dT%H%M%S-%fZ")
     settings = ConnectionSettings(
-        args.host, args.port, args.client_id, args.timeout, args.request_spacing
+        args.host,
+        args.port,
+        args.client_id,
+        args.timeout,
+        args.request_spacing,
+        max_attempts=getattr(args, "max_attempts", 3),
+        recovery_timeout=getattr(args, "recovery_timeout", 60),
     )
     args.cache.parent.mkdir(parents=True, exist_ok=True)
     # A second process fails fast instead of racing per-stock read/merge/write cycles.
@@ -195,6 +221,8 @@ async def run_daily(args):
             "started_at": now.isoformat(),
             "decision_at": decision.isoformat(),
             "out": str(out),
+            "failures": [],
+            "broker": {},
         }
         write_json(out / "status.json", status)
         try:
@@ -209,6 +237,15 @@ async def run_daily(args):
             universe["discovered_count"] = total
             universe["selected_count"] = len(instruments)
             universe["limited"] = len(instruments) < total
+            refresh_path = getattr(args, "refresh_candidates", None)
+            force_refresh = (
+                {item.key for item in read_universe(refresh_path, allow_empty=True)}
+                if refresh_path
+                else set()
+            )
+            if not force_refresh.issubset({item.key for item in instruments}):
+                raise ValueError("Refresh candidates must belong to the selected daily universe")
+            universe["forced_refresh_keys"] = sorted(force_refresh)
             write_json(out / "universe.json", universe)
             if args.seed_snapshot:
                 calendar = Sessions(decision.date() - timedelta(days=1000), decision.date())
@@ -227,6 +264,9 @@ async def run_daily(args):
                 decision,
                 progress=progress,
                 max_downloads=args.max_downloads,
+                failures=status["failures"],
+                diagnostics=status["broker"],
+                force_refresh=force_refresh,
             )
             snapshot = out / "snapshot"
             new_directory(snapshot)
@@ -244,6 +284,8 @@ async def run_daily(args):
                     "use_rth": True,
                     "instruments": identities,
                     "failures": failures,
+                    "broker_messages": status["broker"].get("messages", []),
+                    "retries": status["broker"].get("retries", []),
                     "cache_actions": actions,
                     "universe_scope": universe,
                     "completion_lag_minutes": args.completion_lag_minutes,
@@ -277,6 +319,9 @@ async def run_daily(args):
                     "status": "interrupted_or_failed",
                     "error": str(error),
                     "error_type": type(error).__name__,
+                    "exit_code": 130
+                    if isinstance(error, (KeyboardInterrupt, asyncio.CancelledError))
+                    else 2,
                 }
             )
             raise

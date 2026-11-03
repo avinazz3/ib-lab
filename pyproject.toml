@@ -16,6 +16,7 @@ dependencies = [
   "numpy>=1.26,<3",
   "pandas>=2.2,<4",
   "filelock>=3.16,<4",
+  "tenacity>=9.1,<10",
 ]
 
 [project.optional-dependencies]

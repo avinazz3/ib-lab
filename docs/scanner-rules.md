@@ -10,6 +10,15 @@ feature calculation. Duplicate sessions, invalid OHLCV, and nontrading dates in
 the historical input window cause an explicit data rejection. We use the same
 127-session feature warm-up for each symbol.
 
+Every row includes required/available session counts, first/latest available dates,
+and a count plus sample of missing sessions. Data errors are classified separately
+from failed setup checks. A contiguous short tail ending on the target session is
+`insufficient_history`; holes or a missing latest session are `missing_sessions`;
+no bars is `no_history`. The snapshot manifest can identify an upstream
+`download_failure`, which is attached to the affected report row. A short history
+is not proof that the company recently listed. None of these diagnoses makes an
+incomplete instrument rank-eligible.
+
 ## Eligibility and ranking
 
 - `close >= min_price`.

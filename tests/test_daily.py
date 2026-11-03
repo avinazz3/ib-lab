@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ib_lab.broker import ConnectionSettings
+from ib_lab.broker import BrokerUnavailableError, ConnectionSettings
 from ib_lab.cache import HistoryCache
 from ib_lab.calendar import Sessions
 from ib_lab.cli import main
@@ -320,3 +320,74 @@ def test_concurrent_runs_cannot_share_writer_lock(tmp_path):
                 )
             )
     assert not out.exists()
+
+
+def test_forced_candidate_refresh_fetches_full_history_without_shrinking_universe(
+    tmp_path, history
+):
+    instrument, bars = history
+    other = replace(instrument, symbol="OTHER")
+    cache = HistoryCache(tmp_path / "cache.sqlite")
+    broker = broker_type(instrument, bars)
+    try:
+        cache.put(instrument, 123, bars[-1].session, bars)
+        cache.put(
+            other, 456, bars[-1].session, [replace(b, instrument_key=other.key) for b in bars]
+        )
+        result = asyncio.run(
+            collect(
+                [instrument, other],
+                cache,
+                ConnectionSettings(),
+                DEMO_DECISION,
+                broker_factory=broker,
+                force_refresh={instrument.key},
+            )
+        )
+        assert broker.calls == ["2 Y"]
+        assert [x["action"] for x in result[3]] == ["full_refresh", "reused"]
+        assert len(result[1]) == 2
+        assert {b.instrument_key for b in result[0]} == {instrument.key, other.key}
+    finally:
+        cache.close()
+
+
+def test_sustained_outage_stops_before_later_symbols_and_keeps_checkpoint(tmp_path, history):
+    instrument, bars = history
+    down = replace(instrument, symbol="DOWN")
+    untouched = replace(instrument, symbol="UNTOUCHED")
+    visited = []
+
+    class Broker(broker_type(instrument, bars)):
+        async def resolve(self, item):
+            visited.append(item)
+            if item == down:
+                raise BrokerUnavailableError("connection did not recover")
+            return await super().resolve(item)
+
+    failures = []
+    cache = HistoryCache(tmp_path / "cache.sqlite")
+    try:
+        with pytest.raises(BrokerUnavailableError):
+            asyncio.run(
+                collect(
+                    [instrument, down, untouched],
+                    cache,
+                    ConnectionSettings(),
+                    DEMO_DECISION,
+                    broker_factory=Broker,
+                    failures=failures,
+                )
+            )
+        assert visited == [instrument, down]
+        assert len(cache.get(instrument)[2]) == 160
+        assert cache.get(untouched) is None
+        assert failures == [
+            {
+                "instrument_key": down.key,
+                "error_type": "BrokerUnavailableError",
+                "error": "connection did not recover",
+            }
+        ]
+    finally:
+        cache.close()

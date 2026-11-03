@@ -55,7 +55,7 @@ def aware_timestamp(value: str) -> datetime:
     return result
 
 
-def read_universe(path: Path) -> list[Instrument]:
+def read_universe(path: Path, *, allow_empty: bool = False) -> list[Instrument]:
     with path.open(newline="") as handle:
         reader = csv.DictReader(handle)
         if not {"symbol", "primary_exchange"}.issubset(reader.fieldnames or []):
@@ -64,7 +64,7 @@ def read_universe(path: Path) -> list[Instrument]:
             Instrument(row["symbol"].strip().upper(), row["primary_exchange"].strip().upper())
             for row in reader
         ]
-    if not instruments:
+    if not instruments and not allow_empty:
         raise ValueError("Universe is empty")
     keys = [item.key for item in instruments]
     if len(keys) != len(set(keys)):
