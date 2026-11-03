@@ -93,12 +93,14 @@ class ReadOnlyBroker:
             raise ValueError("Qualified contract is not a USD stock")
         return result
 
-    async def historical(self, contract, end: datetime, *, minute: bool = False):
+    async def historical(
+        self, contract, end: datetime, *, minute: bool = False, duration: str | None = None
+    ):
         await self._pace()
         bars = await self.ib.reqHistoricalDataAsync(
             contract,
             endDateTime=end,
-            durationStr="2 D" if minute else "2 Y",
+            durationStr=duration or ("2 D" if minute else "2 Y"),
             barSizeSetting="1 min" if minute else "1 day",
             whatToShow="TRADES",
             useRTH=True,
@@ -111,8 +113,10 @@ class ReadOnlyBroker:
             raise ValueError("No historical bars returned; inspect permissions and broker errors")
         return bars
 
-    async def daily(self, instrument: Instrument, contract, end: datetime) -> list[DailyBar]:
-        raw = await self.historical(contract, end)
+    async def daily(
+        self, instrument: Instrument, contract, end: datetime, *, duration: str = "2 Y"
+    ) -> list[DailyBar]:
+        raw = await self.historical(contract, end, duration=duration)
         bars = []
         for item in raw:
             day = item.date

@@ -29,20 +29,28 @@ def parser() -> argparse.ArgumentParser:
     scan.add_argument("--as-of", type=aware_timestamp, required=True)
     scan.add_argument("--config", type=Path)
     scan.add_argument("--out", type=Path, required=True)
-    for command in ("probe", "download"):
+    for command in ("probe", "download", "daily"):
         sub = commands.add_parser(command, help="Read-only IBKR " + command)
         sub.add_argument("--host", default="127.0.0.1")
         sub.add_argument("--port", type=int, default=7497)
         sub.add_argument("--client-id", type=int, default=31)
         sub.add_argument("--timeout", type=float, default=20)
         sub.add_argument("--request-spacing", type=float, default=1)
-        sub.add_argument("--out", type=Path, required=True)
+        sub.add_argument("--out", type=Path, required=command != "daily")
         if command == "probe":
             sub.add_argument("--symbol", default="AAPL")
             sub.add_argument("--primary-exchange", default="NASDAQ")
             sub.add_argument("--data-type", type=int, choices=(1, 2, 3, 4), default=1)
-        else:
+        elif command == "download":
             sub.add_argument("--universe", type=Path, required=True)
+        else:
+            sub.add_argument("--universe", type=Path, help="Override automatic listing discovery")
+            sub.add_argument("--cache", type=Path, default=Path("data/history-cache.sqlite"))
+            sub.add_argument("--seed-snapshot", type=Path)
+            sub.add_argument("--config", type=Path)
+            sub.add_argument("--max-symbols", type=int)
+            sub.add_argument("--max-downloads", type=int)
+            sub.add_argument("--completion-lag-minutes", type=float, default=20)
     return root
 
 
@@ -185,6 +193,17 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "scan":
             return run_scan(args)
+        if args.command == "daily":
+            import math
+
+            from ib_lab.daily import run_daily
+
+            for limit in (args.max_symbols, args.max_downloads):
+                if limit is not None and limit < 1:
+                    raise ValueError("Symbol/download limits must be positive")
+            if not math.isfinite(args.completion_lag_minutes) or args.completion_lag_minutes < 0:
+                raise ValueError("Completion lag must be finite and nonnegative")
+            return asyncio.run(run_daily(args))
         return asyncio.run(run_broker(args))
     except Exception as error:
         # CLI boundary: SDK RequestError is not an OSError; report it consistently too.
