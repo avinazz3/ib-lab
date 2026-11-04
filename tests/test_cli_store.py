@@ -94,6 +94,10 @@ def test_universe_requires_identity_and_unique_listings(tmp_path):
     path.write_text("symbol\nAAPL\n")
     with pytest.raises(ValueError, match="headers"):
         read_universe(path)
+    path.write_text("symbol,primary_exchange\n")
+    assert read_universe(path, allow_empty=True) == []
+    with pytest.raises(ValueError, match="empty"):
+        read_universe(path)
 
 
 def test_no_trading_commands_are_exposed():
@@ -173,3 +177,35 @@ def test_partial_download_keeps_successes_and_missing_instruments_visible(tmp_pa
     report = json.loads((output / "report.json").read_text())
     assert report["universe_count"] == 2
     assert report["data_error_count"] == 1
+    assert report["download_failure_count"] == 1
+    assert report["data_error_counts"] == {"download_failure": 1}
+    failed = next(r for r in report["results"] if "download_failure" in r)
+    assert failed["download_failure"]["error_type"] == "ValueError"
+
+
+@pytest.mark.parametrize("passed,expected_code", [(False, 1), (True, 0)])
+def test_require_live_keeps_diagnostic_report_and_returns_gate_result(
+    tmp_path,
+    monkeypatch,
+    passed,
+    expected_code,
+):
+    class Broker:
+        def __init__(self, _settings):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            pass
+
+        async def probe(self, _instrument, data_type):
+            assert data_type == 1
+            return {"quote": {"live_quote_check_passed": passed, "execution_ready": False}}
+
+    monkeypatch.setattr("ib_lab.cli.ReadOnlyBroker", Broker)
+    out = tmp_path / "probe"
+    assert main(["probe", "--require-live", "--out", str(out)]) == expected_code
+    assert json.loads((out / "probe.json").read_text())["quote"]["execution_ready"] is False
+    assert main(["probe", "--require-live", "--data-type", "3", "--out", str(out)]) == 2

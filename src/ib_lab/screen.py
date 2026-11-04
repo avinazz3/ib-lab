@@ -154,16 +154,36 @@ def screen(
             "checks": {},
         }
         rows = sorted(grouped[instrument.key], key=lambda b: b.session)
+        missing = sorted(expected_set - {b.session for b in rows})
+        row["history"] = {
+            "required_sessions": 127,
+            "available_required_sessions": 127 - len(missing),
+            "first_available_session": rows[0].session.isoformat() if rows else None,
+            "latest_available_session": rows[-1].session.isoformat() if rows else None,
+            "missing_session_count": len(missing),
+            "missing_session_sample": [day.isoformat() for day in missing[:5]],
+        }
+        error_kind = "duplicate_sessions"
         try:
             if len({b.session for b in rows}) != len(rows):
                 raise ValueError("Duplicate session")
+            error_kind = "nontrading_sessions"
             if any(not calendar.calendar.is_session(b.session) for b in rows):
                 raise ValueError("Bar on a nontrading session")
-            if not expected_set.issubset({b.session for b in rows}):
+            error_kind = "no_history" if not rows else "missing_sessions"
+            if (
+                rows
+                and rows[-1].session == expected[-1]
+                and all(day < rows[0].session for day in missing)
+            ):
+                error_kind = "insufficient_history"
+            if missing:
                 raise ValueError("Missing recent sessions or insufficient history")
+            error_kind = "invalid_bars"
             for bar in rows:
                 bar.validate()
             # Fixed warm-up length makes features independent of extra old history.
+            error_kind = "feature_error"
             f = features(rows[-127:])
             row["features"] = f
             checks = {
@@ -179,6 +199,7 @@ def screen(
         except ValueError as error:
             row["reasons"] = ["data_quality"]
             row["data_error"] = str(error)
+            row["data_error_kind"] = error_kind
         results.append(row)
     percentiles = (
         {

@@ -66,6 +66,42 @@ universe silently. The snapshot keeps up to the latest 146 completed bars per st
 the cache retains the broader history. It is intended for the frozen daily scan,
 not arbitrary historical replay.
 
+`--refresh-candidates PATH` accepts an existing candidates CSV (or a universe CSV).
+Every listed instrument must belong to the selected broad universe. A header-only
+shortlist is a valid no-op. Those stocks always re-resolve and fetch two-year
+history, even if today's cached entry is fresh. The remaining stocks follow the
+normal cache policy. The full selected universe is still ranked; do not substitute
+a six-stock shortlist for it. Forced refresh keys are recorded in `universe.json`.
+
+## Connectivity and retries
+
+The shared broker adapter uses Tenacity for up to three total attempts per transient
+request, waiting 2 then 4 seconds by default (capped at 10 seconds for additional
+attempts). Timeouts, connection errors, SDK empty-history responses and recognized
+162 pacing/connection/cancellation messages are retryable. Permission errors,
+unresolved contracts and invalid OHLCV are not retried as transient failures.
+The SDK cannot distinguish every historical timeout from an empty result;
+`EmptyHistoryError` explicitly preserves that ambiguity. Empty responses alone do
+not trigger the consecutive-outage stop, since some symbols legitimately have no
+history; their exhausted attempts remain visible as individual failures.
+
+On 1100, pause before issuing new requests and await 1101/1102 for up to
+`--recovery-timeout` seconds (default 60). A socket disconnect reconnects with the
+same positive client ID, Read-Only flag and StartupFetchNONE. If connectivity changes
+while a response is in flight, discard it and retry the request. The data-only
+client suppresses ib_async 2.1.0's default 1102 account-summary resubscription hook
+for the lifetime of its context, then restores it on cleanup. No account-summary
+subscriptions are requested by this application.
+
+Failure to recover or three consecutive exhausted transient requests of the same
+operation aborts collection with exit 2. Later instruments are not marked failed
+in a cascade. `status.json` retains typed failures, broker messages and retry
+records; successful cache transactions survive, and no completed scan is claimed
+for an aborted collection. Rerun after recovery to resume from cache. Individual
+nonfatal failures still produce a partial snapshot and scan. `--max-attempts`
+changes the per-request attempt bound; download budgets continue to count stocks,
+not the physical requests made during retries.
+
 ## Output and ranking
 
 Each automatically timestamped run directory contains:
@@ -90,6 +126,13 @@ not an error. Failed downloads or scan data errors return exit 1; initialization
 errors return 2; interruption returns 130. The default thresholds remain strict.
 Pass `--config configs/breakout-review.json` to select the approved broader human
 review rules. The scanner never adjusts thresholds automatically to produce candidates.
+
+`report.json` attaches source download failures to the affected rows and aggregates
+data error kinds. Per-instrument history coverage separates short contiguous
+histories from internal missing sessions and wholly absent data. Insufficient
+history remains ineligible; it is not assumed to be a confirmed IPO. A partial
+snapshot generates an explicit ranking-coverage warning. These diagnostics do not
+weaken the existing 127-session completeness requirement.
 
 The exact setup rules remain in [scanner-rules.md](scanner-rules.md). Automated
 universe/data orchestration does not implement entries, stops, sizing or exits.

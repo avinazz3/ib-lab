@@ -109,6 +109,20 @@ For subsequent daily collection with the review rules:
 python -m ib_lab daily --port 7496 --config configs/breakout-review.json
 ```
 
+To refresh the shortlist's history even when it is already cached for the target session:
+
+```bash
+python -m ib_lab daily --port 7496 \
+  --config configs/breakout-review.json \
+  --refresh-candidates runs/review-001/candidates.csv
+```
+
+This forces a two-year download for those names and recomputes the broad-universe
+scan at the new run's completed-session cutoff. Other stocks follow normal cache
+updates, so a new trading session can still require a broad refresh. The shortlist
+does not replace the ranking universe. Review the new report before approving a
+setup; existing news and approval decisions are not automatically refreshed.
+
 ## Run the automatic daily workflow
 
 With your current live TWS connection in Read-Only API mode:
@@ -158,6 +172,24 @@ Run during the regular session for the most useful live-quote diagnostic. Receiv
 bars or a delayed/frozen quote does not establish an execution-ready feed. The
 probe never marks a feed as ready to trade.
 
+After enabling the relevant live API market-data subscriptions, run during the
+regular US session:
+
+```bash
+python -m ib_lab probe --symbol AAPL --primary-exchange NASDAQ \
+  --port 7496 --data-type 1 --require-live --out runs/live-check-001
+```
+
+`--require-live` returns exit 1 unless the quote has positive, non-crossed bid/ask,
+observed data type 1, a receive timestamp no more than five seconds old (and not
+in the future), and no detected connection change during the subscription. The
+probe report is saved even when this diagnostic fails. It also reports spread,
+receive age, last completed session and age of the latest historical minute bar.
+Receive time is not an exchange timestamp. Passing does not verify consolidated
+NBBO coverage, exchange freshness or execution readiness; `execution_ready` and
+`exchange_freshness_verified` remain false. Buying subscriptions and testing the
+real feed are account-holder steps; this program cannot enable an entitlement.
+
 The adapter passes `readonly=True`. This client flag controls client behavior;
 the TWS/Gateway Read-Only API setting provides broker-side order protection.
 The adapter exposes only data methods and no code submits or cancels orders.
@@ -205,6 +237,16 @@ Use `daily` for checkpointed incremental updates. `--request-spacing` provides l
 also throttles messages. A larger production universe will require further
 request budgeting and incremental caching.
 
+Data requests retry transient failures up to three total attempts, with exponential
+backoff using Tenacity. Permission and unresolved-contract failures are not blindly
+retried. On IBKR upstream loss (1100), new requests pause for up to 60 seconds;
+1101/1102 resume them, and responses spanning a connection change are discarded.
+Socket disconnects trigger bounded read-only reconnection. An unrecovered outage,
+or three consecutive timeout/connection failures of one operation exhausting retries, stops
+collection instead of failing every later symbol. `daily` checkpoints survive;
+rerun the same command after recovery. `--max-attempts` and `--recovery-timeout`
+override these bounds. Retry details, broker messages and typed failures are saved.
+
 The `scan` command operates over a supplied snapshot. `daily` can discover current
 listings automatically from Nasdaq Trader, or accept an explicit universe CSV.
 Neither relies on a limited broker-scanner result as if it covered the whole market.
@@ -218,6 +260,13 @@ Only instruments with a complete most-recent 127-session history, valid OHLCV,
 and sufficient price/liquidity enter the ranking denominator. Ties use midrank
 percentiles: `100 * (count_less + 0.5 * count_equal) / count`. Identical returns
 all score 50 rather than all becoming leaders.
+
+Data rejections now identify `download_failure`, `no_history`,
+`insufficient_history`, `missing_sessions`, `duplicate_sessions`,
+`nontrading_sessions`, `invalid_bars` or `feature_error`. Each row reports its
+available history and missing-session count. A short contiguous history can be an
+IPO or a provider limitation; it is not labelled a confirmed IPO. Scan summaries
+show failure counts by kind; partial coverage still yields conditional rankings.
 
 The daily scanner produces a **setup candidate**, not a buy order. Intraday
 opening-range confirmation, sizing, initial stops, and exits are not implemented
