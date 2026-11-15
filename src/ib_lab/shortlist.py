@@ -10,7 +10,8 @@ MIN_PRICE = 3.0
 
 
 async def shortlist(broker, instruments, out):
-    by_listing = {(i.symbol, i.primary_exchange): i for i in instruments}
+    # Both universe loaders enforce one eligible listing per symbol.
+    by_symbol = {item.symbol: item for item in instruments}
     xml = await broker.scanner_parameters()
     (out / "scanner-parameters.xml").write_text(xml, encoding="utf-8")
     advertised = {node.text for node in ElementTree.fromstring(xml).iter("scanCode")}
@@ -28,12 +29,19 @@ async def shortlist(broker, instruments, out):
             contract = row.contractDetails.contract
             exchange = contract.primaryExchange or contract.exchange
             listing_exchange = "NASDAQ" if exchange == "ISLAND" else exchange
-            item = by_listing.get((contract.symbol, listing_exchange))
-            matched = item is not None and contract.secType == "STK" and contract.currency == "USD"
+            item = by_symbol.get(contract.symbol)
+            # SMART is a routing venue. Use the eligible listing's exchange for qualification.
+            matched = (
+                item is not None
+                and contract.secType == "STK"
+                and contract.currency == item.currency
+                and listing_exchange in ("", "SMART", item.primary_exchange)
+            )
             results.append(
                 {
                     "symbol": contract.symbol,
                     "exchange": exchange,
+                    "primary_exchange": contract.primaryExchange,
                     "con_id": contract.conId,
                     "rank": row.rank,
                     "instrument_key": item.key if matched else None,
