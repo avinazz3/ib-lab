@@ -23,6 +23,7 @@ from ib_lab.cache import HistoryCache
 from ib_lab.calendar import Sessions
 from ib_lab.models import Instrument, read_universe
 from ib_lab.screen import RESEARCH_SESSIONS
+from ib_lab.shortlist import shortlist
 from ib_lab.store import new_directory, read_snapshot, sha256, write_json, write_snapshot
 from ib_lab.universe import discover
 
@@ -232,11 +233,24 @@ async def run_daily(args):
             else:
                 instruments, universe = await asyncio.to_thread(discover, out / "universe")
             total = len(instruments)
+            if getattr(args, "ibkr_scanner", False):
+                scanner_broker = ReadOnlyBroker(settings)
+                status["scanner_broker"] = {
+                    "messages": scanner_broker.errors,
+                    "retries": scanner_broker.retries,
+                }
+                async with scanner_broker:
+                    instruments, selection = await shortlist(scanner_broker, instruments, out)
+                universe["prefilter"] = selection
+                universe["shortlisted_count"] = len(instruments)
+                print(f"IBKR scans matched {len(instruments)} of {total} listings", file=sys.stderr)
+            shortlist_count = len(instruments)
             if args.max_symbols:
                 instruments = instruments[: args.max_symbols]
             universe["discovered_count"] = total
             universe["selected_count"] = len(instruments)
             universe["limited"] = len(instruments) < total
+            universe["explicit_symbol_limit"] = len(instruments) < shortlist_count
             refresh_path = getattr(args, "refresh_candidates", None)
             force_refresh = (
                 {item.key for item in read_universe(refresh_path, allow_empty=True)}
@@ -247,6 +261,11 @@ async def run_daily(args):
                 raise ValueError("Refresh candidates must belong to the selected daily universe")
             universe["forced_refresh_keys"] = sorted(force_refresh)
             write_json(out / "universe.json", universe)
+            status.update(
+                discovered=total,
+                selected=len(instruments),
+                prefilter=universe.get("prefilter", {}).get("source"),
+            )
             if args.seed_snapshot:
                 calendar = Sessions(decision.date() - timedelta(days=1000), decision.date())
                 target = calendar.completed(decision.date() - timedelta(days=550), decision)[-1]
@@ -298,10 +317,6 @@ async def run_daily(args):
                 Namespace(snapshot=snapshot, as_of=decision, config=args.config, out=out / "scan")
             )
             report = json.loads((out / "scan" / "report.json").read_text())
-            report["universe_scope"] = universe
-            if universe["limited"]:
-                report["warnings"].append("Explicit symbol limit: this is a subset scan.")
-            write_json(out / "scan" / "report.json", report)
             status.update(
                 {
                     "status": "partial" if code else "complete",

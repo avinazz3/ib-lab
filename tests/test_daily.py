@@ -213,6 +213,89 @@ def test_single_command_seeded_cache_end_to_end(tmp_path, history, monkeypatch):
     assert report["last_completed_session"] == "2026-10-30"
 
 
+@pytest.mark.parametrize("has_matches", [True, False])
+def test_ibkr_scanner_daily_fetches_only_union_of_eligible_hits(
+    tmp_path,
+    history,
+    monkeypatch,
+    has_matches,
+):
+    instrument, bars = history
+    excluded = replace(instrument, symbol="EXCLUDED")
+    seen = []
+
+    def hit(item, exchange):
+        contract = SimpleNamespace(
+            symbol=item.symbol,
+            primaryExchange=exchange,
+            exchange="SMART",
+            secType="STK",
+            currency="USD",
+            conId=123,
+        )
+        return SimpleNamespace(contractDetails=SimpleNamespace(contract=contract), rank=0)
+
+    class Broker(broker_type(instrument, bars)):
+        errors = []
+        retries = []
+
+        async def scanner_parameters(self):
+            return (
+                "<ScanParameterResponse><scanCode>HIGH_VS_13W_HL</scanCode>"
+                "<scanCode>TOP_PERC_GAIN</scanCode></ScanParameterResponse>"
+            )
+
+        async def scanner(self, code, **kwargs):
+            assert kwargs == {"location": "STK.US.MAJOR", "rows": 50, "min_price": 3.0}
+            seen.append(code)
+            rows = [hit(excluded, "NYSE")]
+            if has_matches:
+                rows.append(hit(instrument, instrument.primary_exchange))
+            return rows
+
+    async def collect_with_fake(*args, **kwargs):
+        return await collect(*args, **kwargs, broker_factory=Broker)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return DEMO_DECISION
+
+    monkeypatch.setattr("ib_lab.daily.datetime", Clock)
+    monkeypatch.setattr("ib_lab.daily.ReadOnlyBroker", Broker)
+    monkeypatch.setattr("ib_lab.daily.collect", collect_with_fake)
+    universe = tmp_path / "universe.csv"
+    universe.write_text(
+        f"symbol,primary_exchange\n{instrument.symbol},{instrument.primary_exchange}\n"
+        f"{excluded.symbol},{excluded.primary_exchange}\n"
+    )
+    out = tmp_path / "run"
+    assert (
+        main(
+            [
+                "daily",
+                "--ibkr-scanner",
+                "--universe",
+                str(universe),
+                "--cache",
+                str(tmp_path / "cache.sqlite"),
+                "--out",
+                str(out),
+            ]
+        )
+        == 0
+    )
+    assert seen == ["HIGH_VS_13W_HL", "TOP_PERC_GAIN"]
+    assert Broker.calls == (["2 Y"] if has_matches else [])
+    report = json.loads((out / "scan/report.json").read_text())
+    assert report["ranking_scope"] == "ibkr_shortlist"
+    assert report["universe_count"] == report["candidate_count"] == int(has_matches)
+    if has_matches:
+        row = report["results"][0]
+        assert row["checks"]["leadership"] is False
+        assert len(row["ibkr_scan_hits"]) == 2
+
+
 def test_seed_drops_bar_that_was_incomplete_when_downloaded(tmp_path):
     seed = tmp_path / "seed"
     write_demo(seed)
