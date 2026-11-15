@@ -253,8 +253,11 @@ def test_ibkr_scanner_daily_fetches_only_union_of_eligible_hits(
             if outcome == "empty":
                 return []
             rows = [hit(excluded, "NYSE")]
+            if code == "TOP_PERC_GAIN":
+                rows.append(hit(replace(instrument, symbol="NOTLISTED"), ""))
             if has_matches:
-                rows.append(hit(instrument, instrument.primary_exchange))
+                primary = "" if code == "HIGH_VS_13W_HL" else instrument.primary_exchange
+                rows.append(hit(instrument, primary))
             return rows
 
     async def collect_with_fake(*args, **kwargs):
@@ -305,6 +308,9 @@ def test_ibkr_scanner_daily_fetches_only_union_of_eligible_hits(
         row = report["results"][0]
         assert row["checks"]["leadership"] is False
         assert len(row["ibkr_scan_hits"]) == 2
+        raw_hit = report["universe_scope"]["prefilter"]["scans"][0]["rows"][1]
+        assert raw_hit["exchange"] == "SMART"
+        assert raw_hit["instrument_key"] == instrument.key
 
 
 def test_seed_drops_bar_that_was_incomplete_when_downloaded(tmp_path):
