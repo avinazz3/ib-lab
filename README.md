@@ -269,8 +269,9 @@ universe. `--universe` accepts an explicit listing CSV in either mode.
 
 ## Rules and interpretation
 
-See [`docs/scanner-rules.md`](docs/scanner-rules.md) for exact formulas. Default
-parameters live in `configs/breakout.json`. Unknown configuration keys fail.
+See [`rules.md`](rules.md) for the current filtering criteria and exact formulas.
+Update it in the same PR as any rule change. Default parameters live in
+`configs/breakout.json`. Unknown configuration keys fail.
 
 Only instruments with a complete most-recent 127-session history, valid OHLCV,
 and sufficient price/liquidity enter the ranking denominator. Ties use midrank
