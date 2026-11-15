@@ -243,6 +243,18 @@ async def run_daily(args):
                     instruments, selection = await shortlist(scanner_broker, instruments, out)
                 universe["prefilter"] = selection
                 universe["shortlisted_count"] = len(instruments)
+                for scan in selection["scans"]:
+                    if scan["status"] == "unsupported":
+                        print(f"IBKR {scan['code']}: unavailable in TWS", file=sys.stderr)
+                        continue
+                    rows = scan["rows"]
+                    matched = sum(row["instrument_key"] is not None for row in rows)
+                    suffix = " (row limit reached)" if scan["at_row_limit"] else ""
+                    print(
+                        f"IBKR {scan['code']}: {len(rows)} returned, "
+                        f"{matched} matched eligible listings{suffix}",
+                        file=sys.stderr,
+                    )
                 print(f"IBKR scans matched {len(instruments)} of {total} listings", file=sys.stderr)
             shortlist_count = len(instruments)
             if args.max_symbols:

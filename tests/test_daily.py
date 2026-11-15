@@ -213,13 +213,15 @@ def test_single_command_seeded_cache_end_to_end(tmp_path, history, monkeypatch):
     assert report["last_completed_session"] == "2026-10-30"
 
 
-@pytest.mark.parametrize("has_matches", [True, False])
+@pytest.mark.parametrize("outcome", ["matched", "unmatched", "empty"])
 def test_ibkr_scanner_daily_fetches_only_union_of_eligible_hits(
     tmp_path,
     history,
     monkeypatch,
-    has_matches,
+    outcome,
+    capsys,
 ):
+    has_matches = outcome == "matched"
     instrument, bars = history
     excluded = replace(instrument, symbol="EXCLUDED")
     seen = []
@@ -248,6 +250,8 @@ def test_ibkr_scanner_daily_fetches_only_union_of_eligible_hits(
         async def scanner(self, code, **kwargs):
             assert kwargs == {"location": "STK.US.MAJOR", "rows": 50, "min_price": 3.0}
             seen.append(code)
+            if outcome == "empty":
+                return []
             rows = [hit(excluded, "NYSE")]
             if has_matches:
                 rows.append(hit(instrument, instrument.primary_exchange))
@@ -290,6 +294,13 @@ def test_ibkr_scanner_daily_fetches_only_union_of_eligible_hits(
     report = json.loads((out / "scan/report.json").read_text())
     assert report["ranking_scope"] == "ibkr_shortlist"
     assert report["universe_count"] == report["candidate_count"] == int(has_matches)
+    stderr = capsys.readouterr().err
+    if outcome == "empty":
+        assert "0 returned, 0 matched" in stderr
+        assert any("returned zero scanner rows" in warning for warning in report["warnings"])
+    elif outcome == "unmatched":
+        assert "1 returned, 0 matched" in stderr
+        assert any("none matched eligible listings" in warning for warning in report["warnings"])
     if has_matches:
         row = report["results"][0]
         assert row["checks"]["leadership"] is False

@@ -95,6 +95,17 @@ def run_scan(args) -> int:
             row["ibkr_scan_hits"] = prefilter["hits"][row["instrument_key"]]
         if any(scan["status"] == "unsupported" for scan in prefilter["scans"]):
             report["warnings"].append("TWS did not advertise every configured discovery scan.")
+        if not instruments:
+            if any(scan.get("rows") for scan in prefilter["scans"]):
+                report["warnings"].append(
+                    "IBKR returned scanner rows, but none matched eligible listings. "
+                    "No stocks reached the breakout screen."
+                )
+            else:
+                report["warnings"].append(
+                    "IBKR returned zero scanner rows. No stocks reached the breakout screen. "
+                    "For a live scanner check, run during regular US trading hours."
+                )
     failures = {item["instrument_key"]: item for item in manifest.get("failures", [])}
     for row in report["results"]:
         if row["instrument_key"] in failures:
