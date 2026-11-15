@@ -35,6 +35,14 @@ def parser() -> argparse.ArgumentParser:
     scan.add_argument("--as-of", type=aware_timestamp, required=True)
     scan.add_argument("--config", type=Path)
     scan.add_argument("--out", type=Path, required=True)
+    backtest = commands.add_parser("backtest", help="Evaluate signals from archived daily runs")
+    backtest.add_argument("--runs", type=Path, nargs="+", required=True)
+    backtest.add_argument("--outcomes", type=Path, help="Later daily snapshot for outcome prices")
+    backtest.add_argument("--holding-sessions", type=int, default=5)
+    backtest.add_argument(
+        "--cost-bps", type=float, default=10, help="Cost per side in basis points"
+    )
+    backtest.add_argument("--out", type=Path, required=True)
     for command in ("probe", "download", "daily"):
         sub = commands.add_parser(command, help="Read-only IBKR " + command)
         sub.add_argument("--host", default="127.0.0.1")
@@ -137,6 +145,7 @@ def run_scan(args) -> int:
         "it does not establish point-in-time historical availability."
     )
     new_directory(args.out)
+    report["report_created_at"] = datetime.now(UTC).isoformat()
     write_json(args.out / "report.json", report)
     accepted = [row for row in report["results"] if row["accepted"]]
     feature_columns = [
@@ -348,6 +357,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "scan":
             return run_scan(args)
+        if args.command == "backtest":
+            from ib_lab.backtest import run_backtest
+
+            return run_backtest(args)
         if args.command == "daily":
             import math
 

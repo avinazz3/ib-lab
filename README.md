@@ -22,6 +22,8 @@ project functions connect these libraries and express the strategy-specific rule
   compressed Parquet, contract IDs, provenance, checksums, and per-symbol failures.
 - `scan`: completed-session breakout features, cross-sectional rankings, and
   explicit acceptance/rejection reasons for every instrument.
+- `backtest`: fixed-horizon signal evaluation from archived daily runs. See
+  [backtest steps and assumptions](docs/backtest.md).
 - `demo`: a deterministic, entirely synthetic snapshot to exercise the workflow.
 
 This milestone contains no order-submission functionality. Intraday entries,
