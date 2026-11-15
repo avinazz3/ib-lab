@@ -5,6 +5,9 @@ same pull request whenever a filter, threshold, lookback, eligibility rule or
 required check changes. Each run records its effective configuration and hash
 in `report.json`.
 
+See [the backtest protocol](docs/backtest.md) for how archived signals are
+evaluated against later prices.
+
 ## Universe and IBKR shortlisting
 
 - By default, `daily` takes eligible USD listings from the Nasdaq Trader
