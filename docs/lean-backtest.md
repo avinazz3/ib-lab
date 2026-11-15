@@ -129,6 +129,40 @@ The audit checks access and representative data. It produces no strategy
 returns. Cloud editor access is a practical way to start. QuantConnect lists
 separate requirements for paid CLI access and local dataset downloads.
 
+The reported run on LEAN 2.5.0.0.18265 received 127 prior daily bars per name,
+4,239–4,259 fundamentals per day including both names, and 390 trade minutes,
+five opening-range trade minutes, and 390 usable two-sided quote minutes for
+each name on every audited date.
+
+## Run the pre-open signal replay
+
+From the repository root, generate a single-file cloud project. The bundle uses
+the shared scanner and review JSON directly. The original audit remains in
+`research/lean/main.py`.
+
+```bash
+python3 research/lean/build_signal.py > /tmp/lean-breakout-replay.py
+```
+
+Copy the generated file into `main.py` of a QuantConnect Python project and run
+**Backtest**. In the result's **Logs** tab, filter for `REPLAY`.
+
+This pilot screens July 9, 2018. It uses that morning's dated fundamental
+membership, a genuine SPY premarket minute to set the decision clock, LEAN's
+exchange hours to derive prior sessions, and batched raw history by security ID.
+It queries observed split events only through the pre-open cutoff, ignores
+split warnings, and leaves the raw price and turnover checks on their original
+basis. Vendor membership and the scanner's instrument identifier syntax define
+the pilot universe. The summary counts skipped identifiers, incomplete histories
+and rank-eligible names through its `members`, `screened`, `data_errors` and
+`rank_eligible` fields. `REPLAY candidate=` emits the selected names.
+
+Check that `last_completed` is July 6, the timestamp is before the July 9
+regular open, and dated membership and rank eligibility are nonzero. An empty
+candidate set can be valid. The one-date pilot makes zero trades and does not
+measure returns. A multi-session run should reuse the prior rolling history
+instead of reloading 146 sessions every day.
+
 ## References
 
 - [AlgoSeek US Equities](https://www.quantconnect.com/data/algoseek-us-equities)

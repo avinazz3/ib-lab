@@ -5,18 +5,18 @@ import json
 import math
 from collections import defaultdict
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from statistics import fmean
 
 import numpy as np
 import pandas as pd
 import talib
 
-from ib_lab.calendar import Sessions
 from ib_lab.models import DailyBar, Instrument
 
 STRATEGY_VERSION = "breakout-v0.2"
 LOOKBACKS = (21, 63, 126)
+SCREEN_SESSIONS = max(LOOKBACKS) + 1
 RESEARCH_SESSIONS = 146  # 126 event sessions plus 20 preceding volume observations.
 
 
@@ -128,15 +128,43 @@ def screen(
     *,
     scanner_shortlist: bool = False,
 ) -> dict:
+    from ib_lab.calendar import Sessions
+
     if decision_at.tzinfo is None or decision_at.utcoffset() is None:
         raise ValueError("decision_at must be timezone aware")
     # Bound calendar and all calculations by decision time, not a future row's date.
     start = decision_at.date() - timedelta(days=550)
     calendar = Sessions(start, decision_at.date())
     completed = calendar.completed(start, decision_at)
-    expected = completed[-127:]
+    return screen_completed(
+        bars,
+        instruments,
+        decision_at,
+        config,
+        completed,
+        start,
+        scanner_shortlist=scanner_shortlist,
+    )
+
+
+def screen_completed(
+    bars: list[DailyBar],
+    instruments: list[Instrument],
+    decision_at: datetime,
+    config: BreakoutConfig,
+    completed: list[date],
+    start: date,
+    *,
+    scanner_shortlist: bool = False,
+    raw_history: dict[str, list[DailyBar]] | None = None,
+) -> dict:
+    """Screen completed sessions using the caller's exchange calendar and price basis."""
+    if decision_at.tzinfo is None or decision_at.utcoffset() is None:
+        raise ValueError("Decision timestamp must be timezone aware")
+    expected = completed[-SCREEN_SESSIONS:]
     expected_set = set(expected)
-    if len(expected) < 127:
+    completed_set = set(completed)
+    if len(expected) < SCREEN_SESSIONS:
         raise ValueError("Calendar does not cover 127 completed sessions")
     grouped: dict[str, list[DailyBar]] = defaultdict(list)
     for bar in bars:
@@ -160,8 +188,8 @@ def screen(
         rows = sorted(grouped[instrument.key], key=lambda b: b.session)
         missing = sorted(expected_set - {b.session for b in rows})
         row["history"] = {
-            "required_sessions": 127,
-            "available_required_sessions": 127 - len(missing),
+            "required_sessions": SCREEN_SESSIONS,
+            "available_required_sessions": SCREEN_SESSIONS - len(missing),
             "first_available_session": rows[0].session.isoformat() if rows else None,
             "latest_available_session": rows[-1].session.isoformat() if rows else None,
             "missing_session_count": len(missing),
@@ -172,7 +200,7 @@ def screen(
             if len({b.session for b in rows}) != len(rows):
                 raise ValueError("Duplicate session")
             error_kind = "nontrading_sessions"
-            if any(not calendar.calendar.is_session(b.session) for b in rows):
+            if any(b.session not in completed_set for b in rows):
                 raise ValueError("Bar on a nontrading session")
             error_kind = "no_history" if not rows else "missing_sessions"
             if (
@@ -188,11 +216,22 @@ def screen(
                 bar.validate()
             # Fixed warm-up length makes features independent of extra old history.
             error_kind = "feature_error"
-            f = features(rows[-127:])
+            f = features(rows[-SCREEN_SESSIONS:])
             row["features"] = f
+            close = f["close"]
+            dollar_volume20 = f["dollar_volume20"]
+            if raw_history is not None:
+                raw = sorted(
+                    (b for b in raw_history.get(instrument.key, []) if b.session in expected_set),
+                    key=lambda b: b.session,
+                )[-20:]
+                if [b.session for b in raw] != [b.session for b in rows[-20:]]:
+                    raise ValueError("Raw eligibility history does not match feature dates")
+                close = f["raw_close"] = raw[-1].close
+                dollar_volume20 = f["raw_dollar_volume20"] = fmean(b.close * b.volume for b in raw)
             checks = {
-                "price": f["close"] >= config.min_price,
-                "liquidity": f["dollar_volume20"] >= config.min_dollar_volume,
+                "price": close >= config.min_price,
+                "liquidity": dollar_volume20 >= config.min_dollar_volume,
             }
             row["checks"] = checks
             if all(checks.values()):

@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pytest
 
+from ib_lab.calendar import Sessions
 from ib_lab.demo import DEMO_DECISION, demo_data
+from ib_lab.historical import adjust_known_splits
 from ib_lab.models import DailyBar
-from ib_lab.screen import BreakoutConfig, research_summary, screen, volatility
+from ib_lab.screen import BreakoutConfig, research_summary, screen, screen_completed, volatility
 
 
 @pytest.fixture(scope="module")
@@ -31,6 +33,45 @@ def test_future_and_incomplete_daily_bars_cannot_change_past_scan(data):
     expected = screen(bars, instruments, DEMO_DECISION, BreakoutConfig())
     future = [replace(bar, session=date(2026, 11, 2), close=float("nan")) for bar in bars[-5:]]
     assert screen(bars + future, instruments, DEMO_DECISION, BreakoutConfig()) == expected
+
+
+def test_replay_uses_same_rules_and_ignores_splits_after_decision(data):
+    bars, instruments = data
+    start = DEMO_DECISION.date() - timedelta(days=550)
+    completed = Sessions(start, DEMO_DECISION.date()).completed(start, DEMO_DECISION)
+    future_split = DEMO_DECISION + timedelta(seconds=1)
+    adjusted = adjust_known_splits(bars, [(future_split, 0.01)], DEMO_DECISION)
+    config = BreakoutConfig()
+    assert screen_completed(adjusted, instruments, DEMO_DECISION, config, completed, start) == (
+        screen(bars, instruments, DEMO_DECISION, config)
+    )
+
+
+def test_replay_applies_effective_splits_without_changing_eligibility_prices(data):
+    bars, instruments = data
+    instrument = instruments[-1]
+    raw = [bar for bar in bars if bar.instrument_key == instrument.key]
+    start = DEMO_DECISION.date() - timedelta(days=550)
+    completed = Sessions(start, DEMO_DECISION.date()).completed(start, DEMO_DECISION)
+    cutoff = DEMO_DECISION + timedelta(days=1)
+    adjusted = adjust_known_splits(raw, [(cutoff, 0.01)], cutoff)
+    report = screen_completed(
+        adjusted,
+        [instrument],
+        cutoff,
+        BreakoutConfig(),
+        completed,
+        start,
+        raw_history={instrument.key: raw},
+    )
+    row = report["results"][0]
+    assert row["features"]["close"] == pytest.approx(0.01 * raw[-1].close)
+    assert row["features"]["close"] < BreakoutConfig().min_price
+    assert row["features"]["raw_close"] == raw[-1].close
+    assert row["features"]["dollar_volume20"] == pytest.approx(
+        row["features"]["raw_dollar_volume20"]
+    )
+    assert row["checks"]["price"] and row["checks"]["liquidity"]
 
 
 def test_incomplete_session_excluded_even_when_daily_bar_is_present(data):
