@@ -107,6 +107,24 @@ def test_invalid_pacing_and_reserved_client_id_are_rejected():
         ConnectionSettings(request_spacing=0)
 
 
+def test_scanner_timeout_cancels_subscription_and_clears_pending_request():
+    async def check():
+        from ib_async import IB
+
+        ib = IB()
+        ib.isConnected = lambda: True
+        data = SimpleNamespace(reqId=5)
+        ib.reqScannerSubscription = MagicMock(return_value=data)
+        ib.cancelScannerSubscription = MagicMock()
+        broker = ReadOnlyBroker(ConnectionSettings(timeout=0.01, max_attempts=1), ib)
+        with pytest.raises(TimeoutError):
+            await broker.scanner("TOP_PERC_GAIN", location="STK.US.MAJOR", rows=50, min_price=3)
+        ib.cancelScannerSubscription.assert_called_once_with(data)
+        assert data.reqId not in ib.wrapper._futures
+
+    asyncio.run(check())
+
+
 def test_quote_subscription_is_cancelled_on_task_cancellation():
     async def check():
         ib = fake_ib()

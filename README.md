@@ -103,7 +103,23 @@ Return/change values are fractions (0.05 = 5%); relative volume is a multiple.
 Use the dates for external news research, then make your own review decision.
 This change does not implement approval storage, sizing or order execution.
 
-For subsequent daily collection with the review rules:
+To use IBKR discovery before downloading history:
+
+```bash
+python -m ib_lab daily --port 7496 --ibkr-scanner --config configs/breakout-review.json
+```
+
+This combines the available 13-, 26- and 52-week high scans and the daily gainers
+scan across major US exchanges. Each asks for up to 50 results with a loose
+$3 price floor. The combined list is matched against eligible listings and
+deduplicated before the usual cached history update and breakout checks.
+`universe.json` records each query, its hits and whether it reached the cap.
+The scanner observes live market conditions at query time. Daily features still
+use completed sessions. The local return percentiles describe the discovered
+shortlist, so the leadership check is informational in this mode. Test during the
+regular US session and use the scan report to check coverage.
+
+For broad-universe daily collection with the review rules:
 
 ```bash
 python -m ib_lab daily --port 7496 --config configs/breakout-review.json
@@ -247,9 +263,9 @@ collection instead of failing every later symbol. `daily` checkpoints survive;
 rerun the same command after recovery. `--max-attempts` and `--recovery-timeout`
 override these bounds. Retry details, broker messages and typed failures are saved.
 
-The `scan` command operates over a supplied snapshot. `daily` can discover current
-listings automatically from Nasdaq Trader, or accept an explicit universe CSV.
-Neither relies on a limited broker-scanner result as if it covered the whole market.
+The `scan` command operates over a supplied snapshot, including one produced with
+`--ibkr-scanner`. By default, `daily` uses the full eligible Nasdaq Trader listing
+universe. `--universe` accepts an explicit listing CSV in either mode.
 
 ## Rules and interpretation
 

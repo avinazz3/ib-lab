@@ -79,7 +79,7 @@ class ReadOnlyBroker:
         self._ready.set()
         self._upstream_lost = False
         self._generation = 0
-        self._failed_requests = {"resolve": 0, "historical": 0}
+        self._failed_requests = {"resolve": 0, "historical": 0, "scanner": 0}
 
     def _error(self, req_id, code, message, contract=None) -> None:
         self.errors.append({"request_id": req_id, "code": code, "message": message})
@@ -215,6 +215,45 @@ class ReadOnlyBroker:
             await asyncio.sleep(delay)
         await self._wait_ready()
         self._last_request = monotonic()
+
+    async def scanner_parameters(self) -> str:
+        return await self._request(
+            "scanner",
+            "parameters",
+            lambda: asyncio.wait_for(self.ib.reqScannerParametersAsync(), self.settings.timeout),
+        )
+
+    async def scanner(self, code: str, *, location: str, rows: int, min_price: float):
+        from ib_async import ScannerSubscription, TagValue
+        from ib_async.wrapper import RequestError
+
+        subscription = ScannerSubscription(
+            instrument="STK",
+            locationCode=location,
+            scanCode=code,
+            numberOfRows=rows,
+        )
+        filters = [TagValue("priceAbove", str(min_price))]
+
+        async def request():
+            data = self.ib.reqScannerSubscription(
+                subscription,
+                scannerSubscriptionFilterOptions=filters,
+            )
+            # Mirror ib_async 2.1.0's one-shot future, adding cleanup on error/timeout.
+            future = self.ib.wrapper.startReq(data.reqId, container=data)
+            try:
+                return list(await asyncio.wait_for(future, self.settings.timeout))
+            except RequestError as error:
+                if error.errorCode == 165 and "no items retrieved" in str(error).lower():
+                    return []
+                raise
+            finally:
+                self.ib.wrapper._endReq(data.reqId)
+                if self.ib.isConnected():
+                    self.ib.cancelScannerSubscription(data)
+
+        return await self._request("scanner", code, request)
 
     async def resolve(self, instrument: Instrument):
         from ib_async import Stock

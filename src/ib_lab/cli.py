@@ -58,6 +58,11 @@ def parser() -> argparse.ArgumentParser:
             sub.add_argument("--universe", type=Path, required=True)
         else:
             sub.add_argument("--universe", type=Path, help="Override automatic listing discovery")
+            sub.add_argument(
+                "--ibkr-scanner",
+                action="store_true",
+                help="Prefilter listings using IBKR scans before fetching history",
+            )
             sub.add_argument("--cache", type=Path, default=Path("data/history-cache.sqlite"))
             sub.add_argument("--seed-snapshot", type=Path)
             sub.add_argument(
@@ -77,7 +82,19 @@ def run_scan(args) -> int:
         BreakoutConfig(**json.loads(args.config.read_text())) if args.config else BreakoutConfig()
     )
     bars, instruments, manifest = read_snapshot(args.snapshot)
-    report = screen(bars, instruments, args.as_of, config)
+    scope = manifest.get("universe_scope")
+    prefilter = scope.get("prefilter", {}) if isinstance(scope, dict) else {}
+    scanner_shortlist = prefilter.get("source") == "ibkr_scanner"
+    report = screen(bars, instruments, args.as_of, config, scanner_shortlist=scanner_shortlist)
+    if scope:
+        report["universe_scope"] = scope
+    if isinstance(scope, dict) and scope.get("explicit_symbol_limit", scope.get("limited")):
+        report["warnings"].append("Explicit symbol limit: this is a subset scan.")
+    if scanner_shortlist:
+        for row in report["results"]:
+            row["ibkr_scan_hits"] = prefilter["hits"][row["instrument_key"]]
+        if any(scan["status"] == "unsupported" for scan in prefilter["scans"]):
+            report["warnings"].append("TWS did not advertise every configured discovery scan.")
     failures = {item["instrument_key"]: item for item in manifest.get("failures", [])}
     for row in report["results"]:
         if row["instrument_key"] in failures:
@@ -150,6 +167,7 @@ def run_scan(args) -> int:
                 *feature_columns,
                 *[f"return_{n}_start" for n in LOOKBACKS],
                 *[f"check_{key}" for key in check_columns],
+                "ranking_scope",
                 "rising_support_required",
                 "event_window_start",
                 "event_window_end",
@@ -169,6 +187,7 @@ def run_scan(args) -> int:
                         for n in LOOKBACKS
                     },
                     **{f"check_{key}": row["checks"][key] for key in check_columns},
+                    "ranking_scope": report["ranking_scope"],
                     "rising_support_required": config.require_rising_support,
                     **{
                         key: row["research"][key]

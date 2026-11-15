@@ -125,6 +125,8 @@ def screen(
     instruments: list[Instrument],
     decision_at: datetime,
     config: BreakoutConfig,
+    *,
+    scanner_shortlist: bool = False,
 ) -> dict:
     if decision_at.tzinfo is None or decision_at.utcoffset() is None:
         raise ValueError("decision_at must be timezone aware")
@@ -144,6 +146,8 @@ def screen(
     eligible = []
     histories = {}
     informational = [] if config.require_rising_support else ["rising_support"]
+    if scanner_shortlist:
+        informational.append("leadership")
     for instrument in instruments:
         row = {
             "instrument": asdict(instrument),
@@ -242,7 +246,12 @@ def screen(
             )
     payload = json.dumps(asdict(config), sort_keys=True, allow_nan=False).encode()
     warnings = ["Rankings are relative to the supplied, data-complete, liquid universe."]
-    if len(eligible) < 50:
+    if scanner_shortlist:
+        warnings.append(
+            "IBKR scanner discovery is capped per query. Percentiles are within the "
+            "shortlist and the local leadership check is informational."
+        )
+    elif len(eligible) < 50:
         warnings.append("Fewer than 50 rank-eligible instruments; leadership is under-resolved.")
     return {
         "strategy_version": STRATEGY_VERSION,
@@ -251,6 +260,7 @@ def screen(
         "config": asdict(config),
         "config_sha256": hashlib.sha256(payload).hexdigest(),
         "informational_checks": informational,
+        "ranking_scope": "ibkr_shortlist" if scanner_shortlist else "supplied_universe",
         "universe_count": len(instruments),
         "rank_eligible_count": len(eligible),
         "candidate_count": sum(row["accepted"] for row in results),

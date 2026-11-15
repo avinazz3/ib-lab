@@ -56,7 +56,11 @@ def read_snapshot(path: Path) -> tuple[list[DailyBar], list[Instrument], dict]:
         raise ValueError("Snapshot bars checksum differs from manifest")
     instruments = [Instrument(**item["instrument"]) for item in manifest["instruments"]]
     keys = [item.key for item in instruments]
-    if len(set(keys)) != len(keys) or not keys:
+    scanner_snapshot = (
+        isinstance(manifest.get("universe_scope"), dict)
+        and manifest["universe_scope"].get("prefilter", {}).get("source") == "ibkr_scanner"
+    )
+    if len(set(keys)) != len(keys) or (not keys and not scanner_snapshot):
         raise ValueError("Snapshot has duplicate or empty universe")
     bars = [DailyBar(**row) for row in pq.read_table(path / "bars.parquet").to_pylist()]
     if any(bar.instrument_key not in keys for bar in bars):
