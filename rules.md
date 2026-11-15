@@ -146,3 +146,6 @@ missing or halted-session bars.
 Historical scans use the snapshot's data vintage and declared membership. An
 as-of timestamp prevents future-price use in the feature code, but cannot turn
 later revised data or today's universe into a point-in-time historical dataset.
+
+See [the LEAN historical backtest protocol](docs/lean-backtest.md) for the
+historical discovery rule, the execution assumptions and the data audit.
