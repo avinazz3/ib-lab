@@ -134,5 +134,5 @@ history remains ineligible; it is not assumed to be a confirmed IPO. A partial
 snapshot generates an explicit ranking-coverage warning. These diagnostics do not
 weaken the existing 127-session completeness requirement.
 
-The exact setup rules remain in [scanner-rules.md](scanner-rules.md). Automated
+The exact setup rules are in [rules.md](../rules.md). Automated
 universe/data orchestration does not implement entries, stops, sizing or exits.
