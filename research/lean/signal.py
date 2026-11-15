@@ -18,6 +18,7 @@ from System import Array
 from ib_lab.historical import adjust_known_splits
 from ib_lab.models import DailyBar, Instrument
 from ib_lab.screen import RESEARCH_SESSIONS, BreakoutConfig, screen_completed
+from research.lean.execution import OpeningRangeExecution
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -33,6 +34,7 @@ class LeanSignalReplay(QCAlgorithm):
     """Run one pre-open snapshot through the shared full-universe screen."""
 
     config: BreakoutConfig
+    simulate_entries = False
 
     def initialize(self):
         self.set_start_date(2018, 7, 9)
@@ -46,6 +48,7 @@ class LeanSignalReplay(QCAlgorithm):
         self._members = {}
         self._membership_at = None
         self._replayed = False
+        self._execution = OpeningRangeExecution(self) if self.simulate_entries else None
         self.add_universe(self._capture_universe)
 
     def _capture_universe(self, rows):
@@ -54,10 +57,13 @@ class LeanSignalReplay(QCAlgorithm):
         return []  # Read bulk history by Symbol without subscribing to the whole universe.
 
     def on_data(self, data):
+        if self._replayed:
+            if self._execution is not None:
+                self._execution.on_data(data)
+            return
         cutoff = self.time
         if (
-            self._replayed
-            or self._membership_at is None
+            self._membership_at is None
             or self._membership_at.date() != cutoff.date()
             or not time(9) <= cutoff.time() < time(9, 30)
             or self._clock.symbol not in data.bars
@@ -125,6 +131,8 @@ class LeanSignalReplay(QCAlgorithm):
             raw_history=raw,
         )
         self._log_summary(report)
+        if self._execution is not None:
+            self._execution.start(report, self._members, self._clock.exchange.hours, cutoff)
 
     def _log_summary(self, report):
         rows = report["results"]
@@ -146,3 +154,9 @@ class LeanSignalReplay(QCAlgorithm):
     def on_end_of_algorithm(self):
         if not self._replayed:
             self.error("REPLAY failed to observe current-day universe and pre-open clock data")
+        elif self._execution is not None:
+            self._execution.finish()
+
+    def on_order_event(self, event):
+        if self._execution is not None:
+            self._execution.on_order_event(event)

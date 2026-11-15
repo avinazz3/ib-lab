@@ -163,6 +163,41 @@ candidate set can be valid. The one-date pilot makes zero trades and does not
 measure returns. A multi-session run should reuse the prior rolling history
 instead of reloading 146 sessions every day.
 
+## Run the July 9 entry pilot
+
+The July 9 signal replay ran at 09:00 New York time and screened 4,259 stocks.
+Of 1,829 rank-eligible stocks, 18 passed the review rules. The replay excluded
+125 stocks with insufficient history, 215 with missing sessions and four
+without history.
+
+Build the entry pilot into a single file and paste it into the cloud project's
+`main.py`.
+
+```bash
+python3 research/lean/build_signal.py --execution > /tmp/lean-entry-pilot.py
+```
+
+Run **Backtest** and filter the result's **Logs** for `ENTRY`. The pilot should
+subscribe to the same 18 dated security IDs after the 09:00 scan. Both the
+opening range and the session low come only from bars received by the time the
+entry is considered. An entry uses the first qualifying completed close, and
+the buy-limit model can fill on the next two completed minutes only. It uses a
+same-minute real trade bar and two-sided quote, plus an adverse 5 bps rounded
+up to the tick, and limits the fill to 1% of that minute's traded volume.
+LEAN accounts for positions and orders. The fill model applies the native
+Interactive Brokers commission to cumulative shares filled and charges the
+increment on each fill, including orders that later cancel. Timeout
+cancellation occurs on the next clock event after
+the two-minute fill window. Positions and pending entries both use the risk
+limits in the portfolio row above.
+
+The `ENTRY` log reports subscribed names, submissions with planned stop prices,
+fills, cancellations and screen outcomes. Compare the UTC fill timestamps with
+the local submission timestamps, accounting for the four-hour difference on
+July 9. An empty fill set can be valid. The pilot ends with any filled shares
+still held. Protective stop orders and the multi-session exit rules are pending,
+so the pilot's portfolio return cannot evaluate the strategy.
+
 ## References
 
 - [AlgoSeek US Equities](https://www.quantconnect.com/data/algoseek-us-equities)
